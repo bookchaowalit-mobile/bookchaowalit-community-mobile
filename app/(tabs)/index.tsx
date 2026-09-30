@@ -1,125 +1,165 @@
-import { StyleSheet, Text, View, ScrollView, Pressable } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { Link } from "expo-router";
+import { useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import {
+  type FeedSort,
+  type Post,
+  type Vote,
+  applyVote,
+  nextVote,
+  normalizeTags,
+  queryFeed,
+  score,
+  tagCounts,
+  validatePost,
+} from "../../lib/community";
 
-export default function HomeScreen() {
+const NOW = Date.now();
+const H = 3_600_000;
+const SEED: Post[] = [
+  { id: "1", title: "Share your weekend side project", author: "ann", tags: ["showcase"], createdAt: NOW - 30 * H, upvotes: 24, downvotes: 2 },
+  { id: "2", title: "Best way to learn TypeScript in 2026?", author: "bob", tags: ["typescript", "help"], createdAt: NOW - 5 * H, upvotes: 9, downvotes: 0 },
+  { id: "3", title: "Expo Router tips and tricks thread", author: "cat", tags: ["expo", "tips"], createdAt: NOW - 1 * H, upvotes: 3, downvotes: 0 },
+  { id: "4", title: "Weekly meetup: remote pairing session", author: "dan", tags: ["events"], createdAt: NOW - 50 * H, upvotes: 12, downvotes: 1 },
+];
+const SORTS: FeedSort[] = ["hot", "new", "top"];
+
+export default function FeedScreen() {
+  const [posts, setPosts] = useState<Post[]>(SEED);
+  const [votes, setVotes] = useState<Record<string, Vote>>({});
+  const [sort, setSort] = useState<FeedSort>("hot");
+  const [tag, setTag] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [title, setTitle] = useState("");
+  const [tagInput, setTagInput] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const feed = useMemo(() => queryFeed(posts, { sort, tag, search }), [posts, sort, tag, search]);
+  const tags = useMemo(() => tagCounts(posts), [posts]);
+
+  const vote = (id: string, pressed: 1 | -1) => {
+    const previous = votes[id] ?? 0;
+    const next = nextVote(previous, pressed);
+    setPosts((list) => list.map((p) => (p.id === id ? applyVote(p, previous, next) : p)));
+    setVotes((v) => ({ ...v, [id]: next }));
+  };
+
+  const submit = () => {
+    const problem = validatePost(title);
+    setError(problem);
+    if (problem) return;
+    const post: Post = {
+      id: String(Date.now()),
+      title: title.trim(),
+      author: "you",
+      tags: normalizeTags(tagInput),
+      createdAt: Date.now(),
+      upvotes: 1,
+      downvotes: 0,
+    };
+    setPosts((list) => [post, ...list]);
+    setVotes((v) => ({ ...v, [post.id]: 1 }));
+    setTitle("");
+    setTagInput("");
+  };
+
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Community</Text>
-        <Text style={styles.subtitle}>Community — Mobile app (expo)</Text>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <View style={styles.card}>
+        <TextInput accessibilityLabel="Post title" onChangeText={setTitle} placeholder="Start a discussion…" style={styles.input} value={title} />
+        <TextInput
+          accessibilityLabel="Tags, comma separated"
+          autoCapitalize="none"
+          onChangeText={setTagInput}
+          placeholder="Tags (e.g. help, expo)"
+          style={styles.input}
+          value={tagInput}
+        />
+        {error && <Text style={styles.error}>{error}</Text>}
+        <Pressable accessibilityRole="button" onPress={submit} style={styles.button}>
+          <Text style={styles.buttonText}>Post</Text>
+        </Pressable>
       </View>
 
-      <View style={styles.cardGrid}>
-        <FeatureCard
-          icon="rocket"
-          title="Getting Started"
-          description="Welcome to the mobile version. Start building your experience."
-        />
-        <FeatureCard
-          icon="code"
-          title="Tech Stack"
-          description="Built with Expo, React Native, and TypeScript."
-        />
-        <FeatureCard
-          icon="phone-portrait"
-          title="Cross-Platform"
-          description="Runs on iOS, Android, and Web from a single codebase."
-        />
+      <TextInput accessibilityLabel="Search posts" onChangeText={setSearch} placeholder="Search title or author" style={styles.input} value={search} />
+
+      <View style={styles.chips}>
+        {SORTS.map((s) => (
+          <Chip key={s} label={s} active={s === sort} onPress={() => setSort(s)} />
+        ))}
+      </View>
+      <View style={styles.chips}>
+        <Chip label="all" active={tag === null} onPress={() => setTag(null)} />
+        {tags.map(([t, n]) => (
+          <Chip key={t} label={`#${t} (${n})`} active={tag === t} onPress={() => setTag(tag === t ? null : t)} />
+        ))}
       </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          Part of Chaowalit Greepoke's 101 Portfolio Projects
-        </Text>
-        <Link href="https://bookchaowalit.com" asChild>
-          <Pressable>
-            <Text style={styles.link}>bookchaowalit.com</Text>
-          </Pressable>
-        </Link>
-      </View>
+      {feed.length === 0 && <Text style={styles.empty}>No posts match.</Text>}
+      {feed.map((p) => {
+        const mine = votes[p.id] ?? 0;
+        return (
+          <View key={p.id} style={styles.post}>
+            <View style={styles.voteCol}>
+              <Pressable accessibilityLabel="Upvote" accessibilityRole="button" accessibilityState={{ selected: mine === 1 }} hitSlop={8} onPress={() => vote(p.id, 1)}>
+                <Text style={[styles.arrow, mine === 1 && styles.arrowActive]}>▲</Text>
+              </Pressable>
+              <Text accessibilityLabel={`Score ${score(p)}`} style={styles.score}>
+                {score(p)}
+              </Text>
+              <Pressable accessibilityLabel="Downvote" accessibilityRole="button" accessibilityState={{ selected: mine === -1 }} hitSlop={8} onPress={() => vote(p.id, -1)}>
+                <Text style={[styles.arrow, mine === -1 && styles.arrowActive]}>▼</Text>
+              </Pressable>
+            </View>
+            <View style={styles.postBody}>
+              <Text style={styles.postTitle}>{p.title}</Text>
+              <Text style={styles.meta}>
+                by {p.author}
+                {p.tags.length ? ` · ${p.tags.map((t) => `#${t}`).join(" ")}` : ""}
+              </Text>
+            </View>
+          </View>
+        );
+      })}
     </ScrollView>
   );
 }
 
-function FeatureCard({
-  icon,
-  title,
-  description,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  description: string;
-}) {
+function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <View style={styles.card}>
-      <Ionicons name={icon} size={28} color="#4A90D9" />
-      <Text style={styles.cardTitle}>{title}</Text>
-      <Text style={styles.cardDescription}>{description}</Text>
-    </View>
+    <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[styles.chip, active && styles.chipActive]}>
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F5F5F5",
-  },
-  header: {
-    backgroundColor: "#4A90D9",
-    padding: 24,
-    paddingTop: 16,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "bold",
-    color: "#fff",
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: "rgba(255,255,255,0.85)",
-    lineHeight: 20,
-  },
-  cardGrid: {
-    padding: 16,
-    gap: 12,
-  },
-  card: {
+  container: { flex: 1, backgroundColor: "#F5F5F5" },
+  content: { padding: 16, gap: 10 },
+  card: { backgroundColor: "#fff", borderRadius: 12, padding: 12, gap: 8 },
+  input: {
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    alignItems: "center",
-    gap: 8,
+    borderColor: "#ccc",
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 15,
   },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#333",
-  },
-  cardDescription: {
-    fontSize: 14,
-    color: "#666",
-    textAlign: "center",
-    lineHeight: 20,
-  },
-  footer: {
-    padding: 24,
-    alignItems: "center",
-    gap: 8,
-  },
-  footerText: {
-    fontSize: 12,
-    color: "#999",
-  },
-  link: {
-    fontSize: 14,
-    color: "#4A90D9",
-    fontWeight: "500",
-  },
+  error: { color: "#C62828", fontSize: 13 },
+  button: { backgroundColor: "#2F6DB5", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
+  buttonText: { color: "#fff", fontWeight: "600" },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  chip: { borderRadius: 14, borderWidth: 1, borderColor: "#2F6DB5", paddingHorizontal: 10, paddingVertical: 4 },
+  chipActive: { backgroundColor: "#2F6DB5" },
+  chipText: { color: "#2F6DB5", textTransform: "capitalize" },
+  chipTextActive: { color: "#fff" },
+  empty: { color: "#666", textAlign: "center", marginTop: 16 },
+  post: { flexDirection: "row", backgroundColor: "#fff", borderRadius: 12, padding: 12, gap: 12 },
+  voteCol: { alignItems: "center", width: 36 },
+  arrow: { fontSize: 18, color: "#888" },
+  arrowActive: { color: "#2F6DB5" },
+  score: { fontWeight: "700", color: "#222" },
+  postBody: { flex: 1, gap: 4 },
+  postTitle: { fontSize: 16, fontWeight: "600", color: "#222" },
+  meta: { fontSize: 12, color: "#666" },
 });

@@ -1,0 +1,88 @@
+/**
+ * Pure community-feed logic (no React Native imports) so it can be unit-tested.
+ */
+
+export interface Post {
+  id: string;
+  title: string;
+  author: string;
+  tags: string[];
+  createdAt: number;
+  upvotes: number;
+  downvotes: number;
+}
+
+export type Vote = -1 | 0 | 1;
+export type FeedSort = "hot" | "new" | "top";
+
+export const score = (p: Post) => p.upvotes - p.downvotes;
+
+/**
+ * Reddit-style "hot" rank: log-scaled net score plus a recency bonus,
+ * so a new post with a few votes can outrank an old popular one.
+ * `halfLifeHours` controls how many hours are worth one order of magnitude of votes.
+ */
+export function hotRank(p: Post, halfLifeHours = 12): number {
+  const s = score(p);
+  const order = Math.log10(Math.max(Math.abs(s), 1));
+  const sign = Math.sign(s);
+  const hours = p.createdAt / 3_600_000;
+  return sign * order + hours / halfLifeHours;
+}
+
+/** Applies a change of the current user's vote from `previous` to `next`. */
+export function applyVote(p: Post, previous: Vote, next: Vote): Post {
+  let { upvotes, downvotes } = p;
+  if (previous === 1) upvotes -= 1;
+  if (previous === -1) downvotes -= 1;
+  if (next === 1) upvotes += 1;
+  if (next === -1) downvotes += 1;
+  return { ...p, upvotes: Math.max(0, upvotes), downvotes: Math.max(0, downvotes) };
+}
+
+/** Tapping the same arrow again clears the vote. */
+export const nextVote = (current: Vote, pressed: 1 | -1): Vote => (current === pressed ? 0 : pressed);
+
+/** Lower-cases, strips `#` and whitespace, de-duplicates. Empty tags are dropped. */
+export function normalizeTags(raw: string): string[] {
+  const tags = raw
+    .split(/[,\s]+/)
+    .map((t) => t.replace(/^#+/, "").toLowerCase().trim())
+    .filter(Boolean);
+  return [...new Set(tags)].slice(0, 5);
+}
+
+/** Tag -> post count, most used first (ties alphabetical). */
+export function tagCounts(posts: Post[]): [string, number][] {
+  const counts = new Map<string, number>();
+  for (const p of posts) for (const t of p.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+export interface FeedQuery {
+  sort: FeedSort;
+  tag?: string | null;
+  search?: string;
+}
+
+export function queryFeed(posts: Post[], { sort, tag, search }: FeedQuery): Post[] {
+  const needle = search?.trim().toLowerCase() ?? "";
+  const filtered = posts.filter(
+    (p) =>
+      (!tag || p.tags.includes(tag)) &&
+      (!needle || p.title.toLowerCase().includes(needle) || p.author.toLowerCase().includes(needle)),
+  );
+  const cmp: Record<FeedSort, (a: Post, b: Post) => number> = {
+    hot: (a, b) => hotRank(b) - hotRank(a),
+    new: (a, b) => b.createdAt - a.createdAt,
+    top: (a, b) => score(b) - score(a) || b.createdAt - a.createdAt,
+  };
+  return filtered.sort(cmp[sort]);
+}
+
+export function validatePost(title: string): string | null {
+  const t = title.trim();
+  if (t.length < 5) return "Title must be at least 5 characters.";
+  if (t.length > 120) return "Title must be at most 120 characters.";
+  return null;
+}
