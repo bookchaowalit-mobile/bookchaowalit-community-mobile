@@ -30,3 +30,12 @@ Score: 6/10 (was 5/10) — posts and votes survive restarts and are stored atomi
 - Accessibility: vote buttons name the post; post button labelled; profile links get link roles.
 - Advisories: `overrides.postcss ^8.5.28` clears the high-severity PostCSS advisory in Expo metro-config (minor bump). Remaining `image-size` (metro, bundler-only), `uuid` (via `xcode`) and `decode-uri-component` (via `query-string@7`) need an Expo SDK major upgrade; deliberately not auto-fixed.
 - Verified: typecheck, lint, 20 vitest tests, Android `expo export` bundle.
+
+## Done in this pass (pass 3)
+
+Score: 7.5/10 (was 7/10) — edge-case hunt in `lib/community.ts`.
+
+- Bug: tags typed on CJK/Thai keyboards ("＃React，vue", "ไทย、expo") became one garbled tag, and a zero-width space or BOM created a duplicate tag; `normalizeTags` now NFKC-folds, strips invisibles and also splits on "、".
+- Bug: title length counted UTF-16 units, so "👍👍👍" passed the 5-character minimum (and invisible characters counted too).
+- Search is NFKC-normalised.
+- Verified: typecheck, lint, 22 vitest tests, Android `expo export`.

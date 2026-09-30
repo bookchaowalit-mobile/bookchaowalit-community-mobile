@@ -98,3 +98,16 @@ describe("validatePost", () => {
     expect(validatePost("A fine title")).toBeNull();
   });
 });
+
+describe("pass 3 edge cases", () => {
+  it("folds full-width hash/comma and zero-width characters in tags", () => {
+    expect(normalizeTags("\uFF03React\uFF0Cvue")).toEqual(["react", "vue"]);
+    expect(normalizeTags("expo, ex\u200Bpo, \uFEFFexpo")).toEqual(["expo"]);
+    expect(normalizeTags("ไทย、expo")).toEqual(["ไทย", "expo"]);
+  });
+  it("counts emoji titles by characters, not UTF-16 units", () => {
+    expect(validatePost("👍👍👍")).toMatch(/at least 5/);
+    expect(validatePost("👍👍👍👍👍")).toBeNull();
+    expect(validatePost("\u200B\u200B\u200B\u200B\u200Bab")).toMatch(/at least 5/);
+  });
+});

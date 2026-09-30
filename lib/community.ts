@@ -45,8 +45,12 @@ export const nextVote = (current: Vote, pressed: 1 | -1): Vote => (current === p
 
 /** Lower-cases, strips `#` and whitespace, de-duplicates. Empty tags are dropped. */
 export function normalizeTags(raw: string): string[] {
+  // NFKC folds full-width "＃" and "，" (CJK/Thai keyboards) to "#" and ",";
+  // zero-width characters would otherwise make visually identical tags differ.
   const tags = raw
-    .split(/[,\s]+/)
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .split(/[,、\s]+/)
     .map((t) => t.replace(/^#+/, "").toLowerCase().trim())
     .filter(Boolean);
   return [...new Set(tags)].slice(0, 5);
@@ -66,11 +70,12 @@ export interface FeedQuery {
 }
 
 export function queryFeed(posts: Post[], { sort, tag, search }: FeedQuery): Post[] {
-  const needle = search?.trim().toLowerCase() ?? "";
+  const key = (s: string) => s.normalize("NFKC").toLowerCase();
+  const needle = key(search?.trim() ?? "");
   const filtered = posts.filter(
     (p) =>
       (!tag || p.tags.includes(tag)) &&
-      (!needle || p.title.toLowerCase().includes(needle) || p.author.toLowerCase().includes(needle)),
+      (!needle || key(p.title).includes(needle) || key(p.author).includes(needle)),
   );
   const cmp: Record<FeedSort, (a: Post, b: Post) => number> = {
     hot: (a, b) => hotRank(b) - hotRank(a),
@@ -81,9 +86,10 @@ export function queryFeed(posts: Post[], { sort, tag, search }: FeedQuery): Post
 }
 
 export function validatePost(title: string): string | null {
-  const t = title.trim();
-  if (t.length < 5) return "Title must be at least 5 characters.";
-  if (t.length > 120) return "Title must be at most 120 characters.";
+  // Count code points: "👍👍👍" is 3 characters, not 6 UTF-16 units.
+  const n = Array.from(title.replace(/[\u200B-\u200D\u2060\uFEFF]/g, "").trim()).length;
+  if (n < 5) return "Title must be at least 5 characters.";
+  if (n > 120) return "Title must be at most 120 characters.";
   return null;
 }
 
