@@ -86,3 +86,43 @@ export function validatePost(title: string): string | null {
   if (t.length > 120) return "Title must be at most 120 characters.";
   return null;
 }
+
+/** Posts plus this device's votes, stored together so they cannot drift apart. */
+export interface FeedState {
+  posts: Post[];
+  votes: Record<string, Vote>;
+}
+
+/** Applies a vote press to both the post counts and the remembered vote. */
+export function castVote(state: FeedState, id: string, pressed: 1 | -1): FeedState {
+  const previous = state.votes[id] ?? 0;
+  const next = nextVote(previous, pressed);
+  return {
+    posts: state.posts.map((p) => (p.id === id ? applyVote(p, previous, next) : p)),
+    votes: { ...state.votes, [id]: next },
+  };
+}
+
+function isPost(value: unknown): value is Post {
+  if (typeof value !== "object" || value === null) return false;
+  const p = value as Record<string, unknown>;
+  return (
+    typeof p.id === "string" &&
+    typeof p.title === "string" &&
+    typeof p.author === "string" &&
+    Array.isArray(p.tags) &&
+    p.tags.every((t) => typeof t === "string") &&
+    [p.createdAt, p.upvotes, p.downvotes].every((n) => typeof n === "number" && Number.isFinite(n)) &&
+    (p.upvotes as number) >= 0 &&
+    (p.downvotes as number) >= 0
+  );
+}
+
+/** Type guard used when loading the feed from local storage. */
+export function isFeedState(value: unknown): value is FeedState {
+  if (typeof value !== "object" || value === null) return false;
+  const s = value as Record<string, unknown>;
+  if (!Array.isArray(s.posts) || !s.posts.every(isPost)) return false;
+  if (typeof s.votes !== "object" || s.votes === null || Array.isArray(s.votes)) return false;
+  return Object.values(s.votes).every((v) => v === -1 || v === 0 || v === 1);
+}

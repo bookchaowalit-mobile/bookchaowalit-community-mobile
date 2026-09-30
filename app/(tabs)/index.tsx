@@ -1,17 +1,19 @@
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import {
+  type FeedState,
   type FeedSort,
   type Post,
-  type Vote,
-  applyVote,
-  nextVote,
+  castVote,
+  isFeedState,
   normalizeTags,
   queryFeed,
   score,
   tagCounts,
   validatePost,
 } from "../../lib/community";
+import { valueCodec } from "../../lib/persist";
+import { usePersistentState } from "../../lib/usePersistentState";
 
 const NOW = Date.now();
 const H = 3_600_000;
@@ -22,10 +24,11 @@ const SEED: Post[] = [
   { id: "4", title: "Weekly meetup: remote pairing session", author: "dan", tags: ["events"], createdAt: NOW - 50 * H, upvotes: 12, downvotes: 1 },
 ];
 const SORTS: FeedSort[] = ["hot", "new", "top"];
+const feedCodec = valueCodec(isFeedState);
 
 export default function FeedScreen() {
-  const [posts, setPosts] = useState<Post[]>(SEED);
-  const [votes, setVotes] = useState<Record<string, Vote>>({});
+  const [feedState, setFeedState] = usePersistentState<FeedState>("community.feed.v1", { posts: SEED, votes: {} }, feedCodec);
+  const { posts, votes } = feedState;
   const [sort, setSort] = useState<FeedSort>("hot");
   const [tag, setTag] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -36,12 +39,7 @@ export default function FeedScreen() {
   const feed = useMemo(() => queryFeed(posts, { sort, tag, search }), [posts, sort, tag, search]);
   const tags = useMemo(() => tagCounts(posts), [posts]);
 
-  const vote = (id: string, pressed: 1 | -1) => {
-    const previous = votes[id] ?? 0;
-    const next = nextVote(previous, pressed);
-    setPosts((list) => list.map((p) => (p.id === id ? applyVote(p, previous, next) : p)));
-    setVotes((v) => ({ ...v, [id]: next }));
-  };
+  const vote = (id: string, pressed: 1 | -1) => setFeedState((s) => castVote(s, id, pressed));
 
   const submit = () => {
     const problem = validatePost(title);
@@ -56,8 +54,7 @@ export default function FeedScreen() {
       upvotes: 1,
       downvotes: 0,
     };
-    setPosts((list) => [post, ...list]);
-    setVotes((v) => ({ ...v, [post.id]: 1 }));
+    setFeedState((s) => ({ posts: [post, ...s.posts], votes: { ...s.votes, [post.id]: 1 } }));
     setTitle("");
     setTagInput("");
   };
@@ -75,7 +72,7 @@ export default function FeedScreen() {
           value={tagInput}
         />
         {error && <Text style={styles.error}>{error}</Text>}
-        <Pressable accessibilityRole="button" onPress={submit} style={styles.button}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Post discussion" onPress={submit} style={styles.button}>
           <Text style={styles.buttonText}>Post</Text>
         </Pressable>
       </View>
@@ -100,13 +97,14 @@ export default function FeedScreen() {
         return (
           <View key={p.id} style={styles.post}>
             <View style={styles.voteCol}>
-              <Pressable accessibilityLabel="Upvote" accessibilityRole="button" accessibilityState={{ selected: mine === 1 }} hitSlop={8} onPress={() => vote(p.id, 1)}>
+              <Pressable accessibilityLabel={`Upvote ${p.title}`} accessibilityRole="button" accessibilityState={{ selected: mine === 1 }} hitSlop={8} onPress={() => vote(p.id, 1)}>
                 <Text style={[styles.arrow, mine === 1 && styles.arrowActive]}>▲</Text>
               </Pressable>
               <Text accessibilityLabel={`Score ${score(p)}`} style={styles.score}>
                 {score(p)}
               </Text>
-              <Pressable accessibilityLabel="Downvote" accessibilityRole="button" accessibilityState={{ selected: mine === -1 }} hitSlop={8} onPress={() => vote(p.id, -1)}>
+              <Pressable accessibilityLabel={`Downvote ${p.title}`} accessibilityRole="button"
+ accessibilityState={{ selected: mine === -1 }} hitSlop={8} onPress={() => vote(p.id, -1)}>
                 <Text style={[styles.arrow, mine === -1 && styles.arrowActive]}>▼</Text>
               </Pressable>
             </View>
